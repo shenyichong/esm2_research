@@ -1,6 +1,7 @@
 import torch
 from transformers import AutoTokenizer, AutoModelForMaskedLM
 import numpy as np
+import time 
 
 # Load the tokenizer and model
 model_name = "./esm2_t33_650M_UR50D"  # Adjust the model name as needed 
@@ -20,6 +21,9 @@ attention_mask = torch.ones_like(inputs)
 log_probs = []
 
 model.eval()  # Set the model to evaluation mode
+
+start_time = time.time()  # Start timing
+
 with torch.no_grad():  # Disable gradient computation
     for i in range(len(token_ids)):
         if token_ids[i] == tokenizer.cls_token_id or token_ids[i] == tokenizer.sep_token_id:
@@ -39,6 +43,12 @@ with torch.no_grad():  # Disable gradient computation
         log_prob = torch.log(predicted_prob[original_token_id])
         log_probs.append(log_prob.item())
 
+end_time = time.time()  # End timing
+
 # Calculate the pseudo-perplexity
 pseudo_perplexity = np.exp(-np.mean(log_probs))
+inference_time = (end_time - start_time)   # Convert time to milliseconds
+
 print(f"Pseudo-Perplexity of the sequence: {pseudo_perplexity}")
+print(f"Inference time: {inference_time} s")
+print(f"Sequence Length: {len(token_ids)}, Inference Time: {inference_time:.4f} seconds, Pseudo-Perplexity: {pseudo_perplexity:.4f}")
