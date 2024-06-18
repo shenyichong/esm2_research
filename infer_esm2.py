@@ -1,54 +1,82 @@
 import torch
 from transformers import AutoTokenizer, AutoModelForMaskedLM
 import numpy as np
-import time 
+import time
 
-# Load the tokenizer and model
-model_name = "./esm2_t33_650M_UR50D"  # Adjust the model name as needed 
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForMaskedLM.from_pretrained(model_name)
-
-# Define the sequence you want to infer
+#Define the sequence you want to infer
 sequence = "MGLSDGEWQLVLNVWGKVEADIPGHGQEVLIRLFKSHPETLEKFDRFKHLKTEAEMKASEDLKKHGVTVLTALGGILKKKGHHEAEVKPLAQSHATKHKIPIKYLEFISEAIIHVLHSRHPGDFGADAQGAMNKALELFRKDIAAKYKELGFQG"  # Replace with your sequence
-tokens = tokenizer.tokenize(sequence)
-token_ids = tokenizer.convert_tokens_to_ids(tokens)
+
+# Check if a GPU is available and set the device accordingly
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Model names to compare
+model_paths = [
+    "./esm2_t6_8M_UR50D",
+    "./esm2_t12_35M_UR50D",
+    "./esm2_t30_150M_UR50D",
+    "./esm2_t33_650M_UR50D",
+    "./esm2_t36_3B_UR50D"
+]
 
 # Prepare tensor for inputs
-inputs = torch.tensor([token_ids])
-attention_mask = torch.ones_like(inputs)
+def prepare_inputs(sequence, tokenizer):
+    tokens = tokenizer.tokenize(sequence)
+    token_ids = tokenizer.convert_tokens_to_ids(tokens)
+    inputs = torch.tensor([token_ids]).to(device)
+    return inputs, token_ids
 
 # Calculate pseudo-perplexity
-log_probs = []
+def calculate_pseudo_perplexity(model, tokenizer, inputs, token_ids):
+    attention_mask = torch.ones_like(inputs)
+    log_probs = []
 
-model.eval()  # Set the model to evaluation mode
+    model.eval()  # Set the model to evaluation mode
+    start_time = time.time()  # Start timing
 
-start_time = time.time()  # Start timing
+    with torch.no_grad():  # Disable gradient computation
+        for i in range(len(token_ids)):
+            if token_ids[i] == tokenizer.cls_token_id or token_ids[i] == tokenizer.sep_token_id:
+                continue
 
-with torch.no_grad():  # Disable gradient computation
-    for i in range(len(token_ids)):
-        if token_ids[i] == tokenizer.cls_token_id or token_ids[i] == tokenizer.sep_token_id:
-            continue
-        
-        # Create a copy of the inputs and mask the i-th token
-        masked_input = inputs.clone()
-        masked_input[0, i] = tokenizer.mask_token_id
-        
-        # Perform a forward pass
-        outputs = model(masked_input)
-        predictions = outputs.logits
-        
-        # Get the log probability of the original token at position i
-        predicted_prob = torch.nn.functional.softmax(predictions[0, i], dim=-1)
-        original_token_id = token_ids[i]
-        log_prob = torch.log(predicted_prob[original_token_id])
-        log_probs.append(log_prob.item())
+            # Create a copy of the inputs and mask the i-th token
+            masked_input = inputs.clone()
+            masked_input[0, i] = tokenizer.mask_token_id
 
-end_time = time.time()  # End timing
+            # Perform a forward pass
+            outputs = model(masked_input)
+            predictions = outputs.logits
 
-# Calculate the pseudo-perplexity
-pseudo_perplexity = np.exp(-np.mean(log_probs))
-inference_time = (end_time - start_time)   # Convert time to milliseconds
+            # Get the log probability of the original token at position i
+            predicted_prob = torch.nn.functional.softmax(predictions[0, i], dim=-1)
+            original_token_id = token_ids[i]
+            log_prob = torch.log(predicted_prob[original_token_id])
+            log_probs.append(log_prob.item())
 
-print(f"Pseudo-Perplexity of the sequence: {pseudo_perplexity}")
-print(f"Inference time: {inference_time} s")
-print(f"Sequence Length: {len(token_ids)}, Inference Time: {inference_time:.4f} seconds, Pseudo-Perplexity: {pseudo_perplexity:.4f}")
+    end_time = time.time()  # End timing
+
+    # Calculate the pseudo-perplexity
+    pseudo_perplexity = np.exp(-np.mean(log_probs))
+    inference_time = end_time - start_time  # Convert time to seconds
+    return pseudo_perplexity, inference_time
+
+# Main loop to run the models and compare results
+results = []
+for model_path in model_paths:
+    # Load the tokenizer and model
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    model = AutoModelForMaskedLM.from_pretrained(model_path).to(device)
+    
+    # Prepare inputs
+    inputs, token_ids = prepare_inputs(sequence, tokenizer)
+    
+    # Calculate pseudo-perplexity and inference time
+    pseudo_perplexity, inference_time = calculate_pseudo_perplexity(model, tokenizer, inputs, token_ids)
+    
+    # Store the results
+    results.append((model_path, len(token_ids), inference_time, pseudo_perplexity))
+    print(f"Model: {model_path}, Sequence Length: {len(token_ids)}, Inference Time: {inference_time:.4f} seconds, Pseudo-Perplexity: {pseudo_perplexity:.4f}")
+
+# Print results
+for result in results:
+    model_name, seq_length, inf_time, pseudo_perplexity = result
+    # print(f"Model: {model_name}, Sequence Length: {seq_length}, Inference Time: {inf_time:.4f} seconds, Pseudo-Perplexity: {pseudo_perplexity:.4f}")
