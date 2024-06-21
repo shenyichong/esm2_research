@@ -5,6 +5,7 @@ import time
 
 # Check if a GPU is available and set the device accordingly
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Using device:", device)
 
 # Model names to compare
 model_paths = [
@@ -20,7 +21,7 @@ def prepare_inputs(sequence, tokenizer):
     tokens = tokenizer.tokenize(sequence)
     token_ids = tokenizer.convert_tokens_to_ids(tokens)
     inputs = torch.tensor([token_ids]).to(device)
-    return inputs, token_ids
+    return inputs, token_ids 
 
 # Calculate pseudo-perplexity
 def calculate_pseudo_perplexity(model, tokenizer, inputs, token_ids):
@@ -56,6 +57,7 @@ def calculate_pseudo_perplexity(model, tokenizer, inputs, token_ids):
     inference_time = end_time - start_time  # Convert time to seconds
     return pseudo_perplexity, inference_time
 
+# # -----------------------------------------------------------
 # # problem1: Main loop to run the models and compare results
 # # Define the sequence you want to infer
 # sequence = "MGLSDGEWQLVLNVWGKVEADIPGHGQEVLIRLFKSHPETLEKFDRFKHLKTEAEMKASEDLKKHGVTVLTALGGILKKKGHHEAEVKPLAQSHATKHKIPIKYLEFISEAIIHVLHSRHPGDFGADAQGAMNKALELFRKDIAAKYKELGFQG"  # Replace with your sequence
@@ -81,14 +83,24 @@ def calculate_pseudo_perplexity(model, tokenizer, inputs, token_ids):
 #     model_name, seq_length, inf_time, pseudo_perplexity = result
 #     # print(f"Model: {model_name}, Sequence Length: {seq_length}, Inference Time: {inf_time:.4f} seconds, Pseudo-Perplexity: {pseudo_perplexity:.4f}")
 
+# ------------------------------------------------------
 # problem2 : run inference on different sequence lengths
 from fasta_dataset import FastaDataset
 # Load the tokenizer and fasta dataset
-fasta_file = "uniref50.fasta"
 model_path = model_paths[3]
 tokenizer = AutoTokenizer.from_pretrained(model_path)
 model = AutoModelForMaskedLM.from_pretrained(model_path).to(device)
-fasta_dataset = FastaDataset(fasta_file, tokenizer, limit=1000)
+
+# fasta_file = "uniref50.fasta"
+# length_limit = 728
+# fasta_dataset = FastaDataset(fasta_file, tokenizer, length_limit=length_limit, limit=1000)
+
+# fasta_file = "selected_sequences.fasta"
+fasta_file = "uniref50.fasta"
+max_length = 20000
+length_limit = 20000
+fasta_dataset = FastaDataset(fasta_file, tokenizer, max_length, length_limit)
+
 results = []
 for idx in range(len(fasta_dataset)):
     sequence_data = fasta_dataset[idx]
@@ -104,3 +116,59 @@ for idx in range(len(fasta_dataset)):
     results.append((model_path, len(token_ids), inference_time, pseudo_perplexity))
     print(f"Model: {model_path}, Sequence Length: {len(token_ids)}, Inference Time: {inference_time:.4f} seconds, Pseudo-Perplexity: {pseudo_perplexity:.4f}")
 
+# plot a distribution of sequence lengths using different bins:
+# bins: {"0-100","100-200","200-500","500-1000","1000-2000","2000-5000","5000-10000"}
+# for each bin calculate the average of pseudo_perplexity with different sequence lengths within that bin
+bins = [(0, 100), (100, 200), (200, 500), (500, 1000), (1000, 2000), (2000, 5000), (5000, 10000)]
+bin_labels = ["0-100", "100-200", "200-500", "500-1000", "1000-2000", "2000-5000", "5000-10000"]
+
+# Dictionary to hold pseudo-perplexities for each bin
+bin_pseudo_perplexities = {bin_label: [] for bin_label in bin_labels}
+
+# Dictionary to hold pseudo-perplexities for each sequence length
+length_pseudo_perplexities = defaultdict(list)
+
+for result in results: 
+    model_name, seq_length, inf_time, pseudo_perplexity = result
+    for i,bin in enumerate(bins):
+        if bin[0] < seq_length and bin[1] <= seq_length:
+            if bin[0] < seq_length <= bin[1]:
+                bin_pseudo_perplexities[bin_labels[i]].append(pseudo_perplexity)
+                break
+    length_pseudo_perplexities[seq_length].append(pseudo_perplexity)
+
+
+# Calculate average pseudo-perplexity for each bin
+average_pseudo_perplexities = []
+for bin_label in bin_labels:
+    if bin_pseudo_perplexities[bin_label]:
+        avg_pseudo_perplexity = np.mean(bin_pseudo_perplexities[bin_label])
+    else:
+        avg_pseudo_perplexity = None
+    average_pseudo_perplexities.append(avg_pseudo_perplexity)
+
+# Calculate average pseudo-perplexity for each sequence length
+lengths = sorted(length_pseudo_perplexities.keys())
+average_pseudo_perplexities_by_length = [np.mean(length_pseudo_perplexities[length]) for length in lengths]
+
+# Plotting the bin-based results
+plt.figure(figsize=(10, 6))
+plt.bar(bin_labels, average_pseudo_perplexities, color='skyblue')
+plt.xlabel('Sequence Length Bins')
+plt.ylabel('Average Pseudo-Perplexity')
+plt.title('Average Pseudo-Perplexity by Sequence Length Bins')
+plt.xticks(rotation=45)
+output_file = "avg_pseudo_perplexity_by_seq_length_bins.png"
+plt.savefig(output_file)
+print(f"Plot saved to {output_file}")
+
+# Plotting the length-based results
+plt.figure(figsize=(12, 6))
+plt.plot(lengths, average_pseudo_perplexities_by_length, marker='o', linestyle='-', color='skyblue')
+plt.xlabel('Sequence Length')
+plt.ylabel('Average Pseudo-Perplexity')
+plt.title('Average Pseudo-Perplexity by Sequence Length')
+plt.grid(True)
+output_file = "avg_pseudo_perplexity_by_seq_length.png"
+plt.savefig(output_file)
+print(f"Plot saved to {output_file}")
