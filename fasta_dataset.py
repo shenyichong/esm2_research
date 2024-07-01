@@ -19,10 +19,14 @@ class FastaDataset(Dataset):
                     break
                 if line.startswith(">"):
                     current_pos = handle.tell()
-                    record = next(SeqIO.parse(handle, "fasta"))
-                    sequence_length = len(record.seq)
-                    if sequence_length <= self.length_limit:
-                        start_lines.append(line_num)
+                    try:
+                        record = next(SeqIO.parse(handle, "fasta"))  
+                        sequence_length = len(record.seq)
+                        if sequence_length <= self.length_limit:
+                            start_lines.append(line_num) 
+                    except StopIteration:
+                        print(f"Warning: Incomplete record at line {line_num} in {self.fasta_file}.")
+                        break
                     handle.seek(current_pos)  # Go back to the start of the record
                 line_num += 1
                 if limit and len(start_lines) >= limit:

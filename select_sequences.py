@@ -48,5 +48,5 @@ if __name__ == "__main__":
     bin_sequences = select_sequences(args.fasta_file, bins=[
         "0-100", "100-200", "200-500", "500-1000", "1000-2000", "2000-5000", "5000-10000"], limit_per_bin=args.limit_per_bin)
     
-    # write_sequences_to_fasta(bin_sequences, args.output_fasta_prefix)
-    write_sequences_to_one_fasta(bin_sequences, args.output_fasta_prefix)
+    write_sequences_to_fasta(bin_sequences, args.output_fasta_prefix)
+    # write_sequences_to_one_fasta(bin_sequences, args.output_fasta_prefix)
